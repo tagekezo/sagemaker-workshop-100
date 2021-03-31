@@ -1,0 +1,444 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >-
+  Workshop event template for Service Catalog - Provision a machine learning project (S3 buckets, demo data)
+  and also a SageMaker Studio user, but minimize interdependencies as this is usually a many-many mapping.
+
+Parameters:
+  StudioUserName:
+    Description: >-
+      A username (3-12 lowercase letters) for SageMaker Studio which will also be used in S3 bucket names,
+      etc.
+    Type: String
+    AllowedPattern: "^[a-z]{3,12}"
+    # AllowedPattern: "^[a-zA-Z0-9](-*[a-zA-Z0-9]){0,15}$"
+    ConstraintDescription: The ProjectId can be up to 12 characters, lowercase letters (a-z) only.
+
+  # We don't want participants to see any more parameters than strictly necessary
+Mappings: 
+  RegionMap:
+    af-south-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:af-south-1:559312083959:image/datascience-1.0'
+    ap-east-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:ap-east-1:493642496378:image/datascience-1.0'
+    ap-northeast-1: 
+      DataScienceImageURI: 'arn:aws:sagemaker:ap-northeast-1:102112518831:image/datascience-1.0'
+    ap-northeast-2:
+      DataScienceImageURI: 'arn:aws:sagemaker:ap-northeast-2:806072073708:image/datascience-1.0'
+    ap-south-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:ap-south-1:394103062818:image/datascience-1.0'
+    ap-southeast-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:ap-southeast-1:492261229750:image/datascience-1.0'
+    ap-southeast-2:
+      DataScienceImageURI: 'arn:aws:sagemaker:ap-southeast-2:452832661640:image/datascience-1.0'
+    ca-central-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:ca-central-1:310906938811:image/datascience-1.0'
+    eu-central-1: 
+      DataScienceImageURI: 'arn:aws:sagemaker:eu-central-1:936697816551:image/datascience-1.0'
+    eu-north-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:eu-north-1:243637512696:image/datascience-1.0'
+    eu-south-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:eu-south-1:592751261982:image/datascience-1.0'
+    eu-west-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:eu-west-1:470317259841:image/datascience-1.0'
+    eu-west-2:
+      DataScienceImageURI: 'arn:aws:sagemaker:eu-west-2:712779665605:image/datascience-1.0'
+    eu-west-3:
+      DataScienceImageURI: 'arn:aws:sagemaker:eu-west-3:615547856133:image/datascience-1.0'
+    sa-east-1:
+      DataScienceImageURI: 'arn:aws:sagemaker:sa-east-1:782484402741:image/datascience-1.0'
+    us-east-1: 
+      DataScienceImageURI: 'arn:aws:sagemaker:us-east-1:081325390199:image/datascience-1.0'
+    us-east-2:
+      DataScienceImageURI: 'arn:aws:sagemaker:us-east-2:429704687514:image/datascience-1.0'
+    us-west-1: 
+      DataScienceImageURI: 'arn:aws:sagemaker:us-west-1:742091327244:image/datascience-1.0'
+    us-west-2: 
+      DataScienceImageURI: 'arn:aws:sagemaker:us-west-2:236514542706:image/datascience-1.0'
+
+Resources:
+
+######## SHARED BETWEEN SECTIONS ########
+  # Shared layer loading the cfn-response module (doesn't seem to auto-import with SAM Lambdas)
+  LambdaCommonLayer:
+    Type: 'AWS::Serverless::LayerVersion'
+    Properties:
+      ContentUri: ./setupfns/setup-lambda-common/
+      CompatibleRuntimes:
+        - python3.8
+        - python3.7
+        - python3.6
+    Metadata:
+      BuildMethod: python3.8
+
+
+######## SAGEMAKER STUDIO USER ########
+  # SageMaker Execution Role specific for this new user
+  SageMakerExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      Path: '/DataScience/'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSageMakerFullAccess'
+        - 'arn:aws:iam::aws:policy/IAMFullAccess'
+
+  # Access policy for CFN custom resource lambdas (user setup)
+  UserSetupLambdaPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Path: '/DataSciSetup/' #!Sub '/${ProjectId}/'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GetVPCsAndSubnets
+            Effect: Allow
+            Action:
+              - ec2:AssignPrivateIpAddresses  # (Only needed for user post-setup)
+              - ec2:CreateNetworkInterface  # (Only needed for user post-setup)
+              - ec2:DeleteNetworkInterface  # (Only needed for user post-setup)
+              - ec2:DescribeNetworkInterfaces  # (Only needed for user post-setup)
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeSubnets
+              - ec2:DescribeVpcs
+              - ec2:UnassignPrivateIpAddresses  # (Only needed for user post-setup)
+            Resource:
+              - '*'
+          - Sid: StudioEFSWrite  # (Only needed for user post-setup)
+            Effect: Allow
+            Action:
+              - elasticfilesystem:ClientMount
+              - elasticfilesystem:ClientRootAccess
+              - elasticfilesystem:ClientWrite
+              - elasticfilesystem:DescribeMountTargets
+            Resource: '*'  # TODO: Restrict
+          - Sid: SageMakerDefaultAppSetup
+            Effect: Allow
+            Action:
+              - sagemaker:CreateApp
+            # App ARNs go app/${DomainId}/${UserProfileName}/${AppType}/${AppName}
+            # TODO: Split DescribeDomainFunction to a new policy so this policy can be DomainId-restricted?
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:app/*/*/jupyterserver/*'
+          - Sid: SageMakerDomainPermission
+            Effect: Allow
+            Action:
+              - sagemaker:DescribeDomain
+              - sagemaker:ListDomains
+              - sagemaker:CreateUserProfile
+              - sagemaker:DeleteUserProfile
+              - sagemaker:DescribeUserProfile
+              - sagemaker:UpdateUserProfile
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:domain/*'
+              - !Sub 'arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:user-profile/*'
+          # - Sid: CreateSageMakerServiceLinkedRole
+          #   Effect: Allow
+          #   Action:
+          #     - iam:CreateServiceLinkedRole
+          #   Resource:
+          #     - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/sagemaker.amazonaws.com/AWSServiceRoleForAmazonSageMakerNotebooks'
+          - Sid: SageMakerExecPassRole
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt SageMakerExecutionRole.Arn
+
+  # Access role for CFN custom resource lambdas (user setup)
+  UserSetupLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref UserSetupLambdaPolicy
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Path: '/DataSciSetup/'  # !Sub '/${ProjectId}/'
+
+  DescribeDomainFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Description: CloudFormation custom resource to describe existing SMStudio Domain
+      CodeUri: ./setupfns/describedomain/
+      Handler: main.lambda_handler
+      Role: !GetAtt UserSetupLambdaRole.Arn
+      Runtime: python3.8
+      Timeout: 900
+      Layers:
+        - !Ref LambdaCommonLayer
+
+  ExistingDomainDetails:
+    Type: 'Custom::ExistingSageMakerStudioDomain'
+    Properties:
+      ServiceToken: !GetAtt DescribeDomainFunction.Arn
+
+  UserProfileFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Description: CloudFormation custom resource implementation for SageMaker Studio users
+      CodeUri: ./setupfns/user/
+      Handler: main.lambda_handler
+      Role: !GetAtt UserSetupLambdaRole.Arn
+      Runtime: python3.8
+      Timeout: 900
+      Layers:
+        - !Ref LambdaCommonLayer
+
+  UserProfile:
+    Type: 'Custom::UserProfile'
+    Properties:
+      ServiceToken: !GetAtt UserProfileFunction.Arn
+      # DomainId: GetAtt ExistingDomainDetails.DomainId
+      UserProfileName: !Ref StudioUserName
+      UserSettings:
+        ExecutionRole: !GetAtt SageMakerExecutionRole.Arn
+
+  # We're using custom resource instead for now, because it can return the home EFS UID for use in git cloning.
+  # UserProfile:
+  #   Type: 'AWS::SageMaker::UserProfile'
+  #   Properties:
+  #     DomainId: !GetAtt ExistingDomainDetails.DomainId
+  #     UserProfileName: !Ref StudioUserName
+  #     UserSettings:
+  #       ExecutionRole: !GetAtt SageMakerExecutionRole.Arn
+
+  UserDefaultApp:
+    Type: 'AWS::SageMaker::App'
+    DependsOn:
+      - UserProfile
+    Properties:
+      AppName: default
+      AppType: JupyterServer
+      DomainId: !GetAtt ExistingDomainDetails.DomainId
+      ResourceSpec:
+        InstanceType: system
+      UserProfileName: !Ref StudioUserName
+
+  DataScienceApp:
+    Type: 'AWS::SageMaker::App'
+    DependsOn:
+      - UserProfile
+    Properties: 
+      AppName: datascience-1-0-ml-t3-medium-stackprovisioned
+      AppType: KernelGateway
+      DomainId: !GetAtt ExistingDomainDetails.DomainId
+      ResourceSpec: 
+        InstanceType: ml.t3.medium
+        SageMakerImageArn: !FindInMap
+          - RegionMap
+          - !Ref 'AWS::Region'
+          - DataScienceImageURI
+      UserProfileName: !Ref StudioUserName
+
+  # Actual resource instantiation: Clone the CodeRepo into the user's SMStudio EFS home folder
+  # (And also enable SageMaker Projects permissions)
+  UserSetup:
+    Type: 'Custom::UserSetup'
+    DependsOn:
+      - UserProfile
+    Properties:
+      ServiceToken: !Sub '{{resolve:ssm:/DataSciSetup/UserSetupLambdaArn:1}}'
+      DomainId: !GetAtt ExistingDomainDetails.DomainId
+      UserProfileName: !Ref StudioUserName
+      HomeEfsFileSystemUid: !GetAtt UserProfile.HomeEfsFileSystemUid
+      GitRepository: 'https://github.com/apac-ml-tfc/sagemaker-workshop-100'
+      EnableProjects: True
+
+
+######## PROJECT STACK ########
+  # Raw data bucket (initial target for modelling)
+  RawBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      # Since this stack gets provisioned by Service Catalog, the stack ID is random so the bucket naming is
+      # very unclear unless we explicitly set it:
+      BucketName: !Sub 'creditmodel-${StudioUserName}-mlrawdata-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  RawBucketParam:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Description: ID of the project raw data bucket
+      Name: !Sub '/creditmodel-${StudioUserName}-Project/RawBucket'
+      Type: String
+      Value: !Ref RawBucket
+
+  # Raw data bucket (initial target for modelling)
+  SandboxBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub 'creditmodel-${StudioUserName}-mlsandbox-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  SandboxBucketParam:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Description: ID of the project sandbox data bucket
+      Name: !Sub '/creditmodel-${StudioUserName}-Project/SandboxBucket'
+      Type: String
+      Value: !Ref SandboxBucket
+
+  DataSciencePolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Path: !Sub '/creditmodel-${StudioUserName}/'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: S3RawBucketRead
+            Effect: Allow
+            Action:
+              - 's3:Get*'
+              - 's3:Head*'
+              - 's3:List*'
+              - 's3:Select*'
+            Resource:
+              - !GetAtt RawBucket.Arn
+              - !Sub '${RawBucket.Arn}/*'
+          - Sid: S3SandboxBucketReadWrite
+            Effect: Allow
+            Action:
+              - 's3:*'
+            Resource:
+              - !GetAtt SandboxBucket.Arn
+              - !Sub '${SandboxBucket.Arn}/*'
+          - Sid: SSMParamRead
+            # Allow notebook to read SSM params to locate buckets/etc
+            Effect: Allow
+            Action:
+              - 'ssm:GetParameter'
+              - 'ssm:GetParameterHistory'
+              - 'ssm:GetParameters'
+              - 'ssm:GetParametersByPath'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/creditmodel-${StudioUserName}-Project/*'
+
+  ProjectSetupLambdaPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Path: !Sub '/creditmodel-${StudioUserName}/'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: RawBucketReadWrite  # For DemoData
+            Effect: Allow
+            Action:
+              - 's3:*'
+            Resource:
+              - !GetAtt RawBucket.Arn
+              - !Sub '${RawBucket.Arn}/*'
+          - Sid: SageMakerQueryUsers  # For data science policy attachment
+            Effect: Allow
+            Action:
+              - 'sagemaker:DescribeUserProfile'
+              - 'sagemaker:ListDomains'
+            Resource: '*'
+          - Sid: IAMAttachDataSciPolicy  # For data science policy attachment
+            Effect: Allow
+            Action:
+              - 'iam:AttachRolePolicy'
+              - 'iam:DetachRolePolicy'
+            Resource: '*'  # Any role
+            Condition:
+              ArnEquals:
+                iam:PolicyARN: !Ref DataSciencePolicy
+
+  # Permissions for the Lambda functions implementing our custom CFN resources:
+  ProjectSetupLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref ProjectSetupLambdaPolicy
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Path: !Sub '/creditmodel-${StudioUserName}/'
+
+  # Custom resource implementation for creating Studio users' default apps for faster start-up
+  DemoDataFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Description: >-
+        CloudFormation custom resource implementation to load demo data into the project raw bucket
+      CodeUri: ./setupfns/demodata/
+      Handler: main.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt ProjectSetupLambdaRole.Arn
+      Runtime: python3.8
+      Timeout: 900
+      Layers:
+        - !Ref LambdaCommonLayer
+
+  DemoData:
+    Type: 'Custom::DemoData'
+    DependsOn:
+      - RawBucket
+    Properties:
+      ServiceToken: !GetAtt DemoDataFunction.Arn
+      Dataset: taiwan
+      Bucket: !Ref RawBucket
+      Prefix: ''
+
+  # Custom resource implementation for creating Studio users' default apps for faster start-up
+  UserPermissionsFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Description: >-
+        CloudFormation custom resource implementation to add an IAM policy to SMStudio user execution roles
+      CodeUri: ./setupfns/userperms/
+      Handler: main.lambda_handler
+      Role: !GetAtt ProjectSetupLambdaRole.Arn
+      Runtime: python3.8
+      Timeout: 900
+      Layers:
+        - !Ref LambdaCommonLayer
+
+  DataScientistPolicyAssociations:
+    Type: 'Custom::UserPermissions'
+    DependsOn:
+      - DataSciencePolicy
+      - UserProfile
+    Properties:
+      ServiceToken: !GetAtt UserPermissionsFunction.Arn
+      Users:
+        - !Ref StudioUserName
+      # Users: !Split [',', !Ref StudioUsers]
+      PolicyArn: !Ref DataSciencePolicy
+
+Outputs:
+  UserProfileName:
+    Description: SageMaker Studio user profile
+    Value: !Ref StudioUserName
+  ProjectId:
+    Description: Auto-generated demo project ID
+    Value: !Sub 'creditmodel-${StudioUserName}'
