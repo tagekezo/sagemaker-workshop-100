@@ -434,10 +434,7 @@ Resources:
     Properties:
       Parameters:
         StudioUserName: demouser
-      # Needed to use a different URL format from the Service Catalog one here to get SAM to build! At the
-      # moment it tries to re-upload, reading the https://... as a local file for somem reason.
-      # TODO: Figure how to re-use the existing $MLProjectCFURL instead of re-uploading.
-      TemplateURL: project.tmp.yaml
+      TemplateURL: $MLProjectCFURL
       TimeoutInMinutes: 90
 
   SCMLPortfolioProductAssoc:

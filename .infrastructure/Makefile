@@ -35,7 +35,7 @@ build.project: ##=> Build and package the ML Project stack only
 
 build.environment: ##=> Build and package the ML Environment stack only
 	$(info [*] Building ML Environment SAM stack...)
-	export MLProjectCFURL=https://$${DEPLOYMENT_BUCKET_NAME}.s3.`aws configure get region`.amazonaws.com/$${DEPLOYMENT_BUCKET_PREFIX}project.cf.yaml && \
+	export MLProjectCFURL=https://s3.`aws configure get region`.amazonaws.com/$${DEPLOYMENT_BUCKET_NAME}/$${DEPLOYMENT_BUCKET_PREFIX}project.cf.yaml && \
 		envsubst '$$MLProjectCFURL' <environment.sam.yaml >environment-postsub.tmp.sam.yaml && \
 	  sam build \
 			--use-container \
