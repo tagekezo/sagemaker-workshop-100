@@ -434,8 +434,8 @@ Resources:
     Properties:
       Parameters:
         StudioUserName: demouser
-        TemplateURL: $MLProjectCFURL
-        TimeoutInMinutes: 90
+      TemplateURL: $MLProjectCFURL
+      TimeoutInMinutes: 90
 
   SCMLPortfolioProductAssoc:
     Type: 'AWS::ServiceCatalog::PortfolioProductAssociation'
