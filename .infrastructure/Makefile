@@ -9,7 +9,7 @@ SAM_BUILD_EXTRA_ARGS?=""
 
 SC_PRINCIPAL?="role/Admin"
 USE_EXISTING_SC_ROLES?="yes"
-PROVISION_DEMO_PROJECT?="no"
+PROVISION_DEMO_PROJECT?="yes"
 STUDIO_USER_NAME?="demouser"
 
 target:
@@ -35,16 +35,16 @@ build.project: ##=> Build and package the ML Project stack only
 
 build.environment: ##=> Build and package the ML Environment stack only
 	$(info [*] Building ML Environment SAM stack...)
-	sam build \
+	export MLProjectCFURL=https://$${DEPLOYMENT_BUCKET_NAME}.s3.`aws configure get region`.amazonaws.com/$${DEPLOYMENT_BUCKET_PREFIX}project.cf.yaml && \
+		envsubst '$$MLProjectCFURL' <environment.sam.yaml >environment-postsub.tmp.sam.yaml && \
+	  sam build \
 			--use-container \
-			--template environment.sam.yaml \
+			--template environment-postsub.tmp.sam.yaml \
 			$(SAM_BUILD_EXTRA_ARGS) && \
 		sam package \
 			--s3-bucket $${DEPLOYMENT_BUCKET_NAME} \
 			--s3-prefix $${DEPLOYMENT_BUCKET_PREFIX}sam \
-			--output-template-file environment-presub.tmp.yaml && \
-		export MLProjectCFURL=https://$${DEPLOYMENT_BUCKET_NAME}.s3.`aws configure get region`.amazonaws.com/$${DEPLOYMENT_BUCKET_PREFIX}project.cf.yaml && \
-		envsubst '$$MLProjectCFURL' <environment-presub.tmp.yaml >environment.tmp.yaml && \
+			--output-template-file environment.tmp.yaml && \
 		aws s3 cp environment.tmp.yaml \
 			s3://$${DEPLOYMENT_BUCKET_NAME}/$${DEPLOYMENT_BUCKET_PREFIX}environment.cf.yaml
 # (We use envsubst to replace the Project CF template URL in the environment template with the built &
@@ -143,6 +143,9 @@ define HELP_MESSAGE
 	USE_EXISTING_SC_ROLES: "yes"
 		Description: (For Environment stack) Set 'no' to create SageMaker Service Catalog service
 		roles in your account, or 'yes' if they exist already.
+	PROVISION_DEMO_PROJECT: "yes"
+		Description: Set 'yes' to automatically deploy a "demouser" project during environment
+		deployment, or 'no' to leave this as a separate manual step (from Service Catalog or CFn)
 	STUDIO_USER_NAME: "demouser"
 		Description: (For project stack) Name of the SMStudio user to provision - note this is for
 		project stack deployments only, and does not affect the default user deployed by the env stack
