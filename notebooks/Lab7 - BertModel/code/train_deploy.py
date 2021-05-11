@@ -31,14 +31,18 @@ def flat_accuracy(preds, labels):
 
 def _get_train_data_loader(batch_size, training_dir, is_distributed):
     logger.info("Get train data loader")
-
-    dataset = pd.read_csv(os.path.join(training_dir, "train.csv"))
-    sentences = dataset.sentence.values
-    labels = dataset.label.values
-
+    ## Get the Trianing dataset from teh CSV file, use training_dir as parameter
+    dataset = <insert your code here>
+    
+    ## get the sentences and the labels
+    sentences = <insert your code here>
+    labels = <insert your code here>
+    
+    ## use the tokenizer transform to encode each sentence, use add_special_tokens=True
+    ## https://huggingface.co/transformers/model_doc/bert.html
     input_ids = []
     for sent in sentences:
-        encoded_sent = tokenizer.encode(sent, add_special_tokens=True)
+        encoded_sent = <add your code here>
         input_ids.append(encoded_sent)
 
     # pad shorter sentences
@@ -57,9 +61,10 @@ def _get_train_data_loader(batch_size, training_dir, is_distributed):
         attention_masks.append(att_mask)
 
     # convert to PyTorch data types.
-    train_inputs = torch.tensor(input_ids)
-    train_labels = torch.tensor(labels)
-    train_masks = torch.tensor(attention_masks)
+    ## Add the input_ids, labels and mask as torch tensors
+    train_inputs = <insert your code here>
+    train_labels = <insert your code here>
+    train_masks = <insert your code here>
 
     train_data = TensorDataset(train_inputs, train_masks, train_labels)
     if is_distributed:
@@ -97,9 +102,10 @@ def _get_test_data_loader(test_batch_size, training_dir):
         attention_masks.append(att_mask)
 
     # convert to PyTorch data types.
-    train_inputs = torch.tensor(input_ids)
-    train_labels = torch.tensor(labels)
-    train_masks = torch.tensor(attention_masks)
+    ## Add the input_ids, labels and mask as torch tensors
+    train_inputs = <insert your code here>
+    train_labels = <insert your code here>
+    train_masks = <insert your code here>
 
     train_data = TensorDataset(train_inputs, train_masks, train_labels)
     train_sampler = RandomSampler(train_data)
@@ -133,9 +139,11 @@ def train(args):
     torch.manual_seed(args.seed)
     if use_cuda:
         torch.cuda.manual_seed(args.seed)
+        
+    ## Call both train and test loader
 
-    train_loader = _get_train_data_loader(args.batch_size, args.data_dir, is_distributed)
-    test_loader = _get_test_data_loader(args.test_batch_size, args.test)
+    train_loader = <insert your code here>
+    test_loader = <insert your code here>
 
     logger.debug(
         "Processes {}/{} ({:.0f}%) of train data".format(
