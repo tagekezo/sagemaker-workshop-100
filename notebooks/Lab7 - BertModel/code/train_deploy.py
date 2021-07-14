@@ -29,9 +29,9 @@ def flat_accuracy(preds, labels):
     return np.sum(pred_flat == labels_flat) / len(labels_flat)
 
 
-def _get_train_data_loader(batch_size, training_dir, is_distributed):
+def _get_train_data_loader(batch_size, train_dir, is_distributed):
     logger.info("Get train data loader")
-    ## Get the Trianing dataset from teh CSV file, use training_dir as parameter
+    ## Get the Training dataset from the CSV file, use train_dir as parameter
     dataset = <insert your code here>
     
     ## get the sentences and the labels
@@ -340,11 +340,11 @@ if __name__ == "__main__":
     )
 
     # Container environment
-    parser.add_argument("--hosts", type=list, default=json.loads(os.environ["SM_HOSTS"]))
+    parser.add_argument("--hosts", type=str, default=json.loads(os.environ["SM_HOSTS"])) # you can comment this line out when running locally
     parser.add_argument("--current-host", type=str, default=os.environ["SM_CURRENT_HOST"])
     parser.add_argument("--model-dir", type=str, default=os.environ["SM_MODEL_DIR"])
-    parser.add_argument("--data-dir", type=str, default=os.environ["SM_CHANNEL_TRAINING"])
-    parser.add_argument("--test", type=str, default=os.environ["SM_CHANNEL_TESTING"])
+    parser.add_argument("--data-dir", type=str, default=os.environ["SM_CHANNEL_TRAIN"])
+    parser.add_argument("--test", type=str, default=os.environ["SM_CHANNEL_TEST"])
     parser.add_argument("--num-gpus", type=int, default=os.environ["SM_NUM_GPUS"])
 
     train(parser.parse_args())
