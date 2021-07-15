@@ -1,0 +1,44 @@
+Description: "sagemaker-workshop-100"
+Parameters:
+  EEAssetsBucket:
+    Description: "Region-specific assets S3 bucket name (e.g. ee-assets-prod-us-east-1)"
+    Type: String
+  EEAssetsKeyPrefix:
+    Description: "S3 key prefix where this modules assets are stored. (e.g. modules/my_module/v1/)"
+    Type: String
+Resources:
+  BasicNotebookInstance:
+    Type: "AWS::SageMaker::NotebookInstance"
+    Properties:
+      NotebookInstanceName: "sagemaker-workshop-100"
+      InstanceType: "ml.t3.medium"
+      RoleArn: !GetAtt ExecutionRole.Arn
+      VolumeSizeInGB: 10
+      LifecycleConfigName: !GetAtt BasicNotebookInstanceLifecycleConfig.NotebookInstanceLifecycleConfigName
+  BasicNotebookInstanceLifecycleConfig:
+    Type: "AWS::SageMaker::NotebookInstanceLifecycleConfig"
+    Properties:
+      OnStart:
+        - Content:
+            Fn::Base64: !Sub |
+              #!/bin/bash
+              git clone https://github.com/YuanSingapore/sagemaker-workshop-100.git
+              mv sagemaker-workshop-100 /home/ec2-user/SageMaker
+  ExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "sagemaker.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/service-role/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
+Outputs:
+  BasicNotebookInstanceId:
+    Value: !Ref BasicNotebookInstance
