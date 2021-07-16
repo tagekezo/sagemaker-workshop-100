@@ -4,3 +4,4 @@ regex
 sentencepiece
 sacremoses
 transformers==2.3.0
+s3fs
